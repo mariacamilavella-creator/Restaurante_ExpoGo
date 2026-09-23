@@ -9,7 +9,7 @@
       "backgroundColor": "#ffffff"
     },
     "android": {
-     "package": "com.tuusuario.restauranteapp",
+      "package": "com.tuusuario.restauranteapp",
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
@@ -17,7 +17,15 @@
     },
     "plugins": [
       "expo-sqlite",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {
@@ -26,4 +34,3 @@
     }
   }
 }
-

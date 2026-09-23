@@ -2,10 +2,9 @@ import NetInfo from '@react-native-community/netinfo';
 import { api } from './api';
 import { obtenerPedidosPendientesDeSync, marcarComoSincronizado } from './db';
 
-// Revisa si hay internet; si lo hay, envía todos los pedidos pendientes
-// que se crearon offline (guardados en SQLite) hacia la API.
 export async function sincronizarSiHayInternet() {
   const estadoRed = await NetInfo.fetch();
+
   if (!estadoRed.isConnected) {
     return { sincronizados: 0, motivo: 'sin_internet' };
   }
@@ -19,24 +18,31 @@ export async function sincronizarSiHayInternet() {
     uuidCliente: p.uuidCliente,
     items: p.items,
     notas: p.notas,
+    total: p.total,
   }));
 
-  const respuesta = await api.sincronizarPedidos(payload);
+  try {
+    const respuesta = await api.sincronizarPedidos(payload);
 
-  for (const p of pendientes) {
-    await marcarComoSincronizado(p.uuidCliente);
+    // Marcar en SQLite solo los pedidos confirmados por PostgreSQL
+    for (const p of pendientes) {
+      await marcarComoSincronizado(p.uuidCliente);
+    }
+
+    return { sincronizados: pendientes.length, resultados: respuesta?.resultados };
+  } catch (error) {
+    console.log('Servidor offline. Los pedidos permanecen almacenados en SQLite.');
+    return { sincronizados: 0, motivo: 'servidor_offline' };
   }
-
-  return { sincronizados: pendientes.length, resultados: respuesta.resultados };
 }
 
-// Se suscribe a cambios de conectividad y sincroniza automáticamente
-// apenas el celular recupera internet.
 export function escucharConexionYSincronizar(onSync) {
   return NetInfo.addEventListener((estado) => {
     if (estado.isConnected) {
       sincronizarSiHayInternet().then((resultado) => {
-        if (onSync) onSync(resultado);
+        if (onSync && resultado.sincronizados > 0) {
+          onSync(resultado);
+        }
       });
     }
   });

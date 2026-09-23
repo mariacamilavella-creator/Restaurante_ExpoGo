@@ -4,7 +4,7 @@ let dbInstance = null;
 
 export async function abrirDB() {
   if (!dbInstance) {
-   dbInstance = await SQLite.openDatabaseAsync('restaurante_v2.db');
+    dbInstance = await SQLite.openDatabaseAsync('restaurante_v2.db');
     await dbInstance.execAsync(`
       PRAGMA journal_mode = WAL;
 
@@ -22,7 +22,7 @@ export async function abrirDB() {
   return dbInstance;
 }
 
-// Guarda un pedido localmente (se usa siempre, haya o no internet).
+// Guarda un pedido localmente (se ejecuta SIEMPRE antes de intentar subir al servidor)
 export async function guardarPedidoLocal(pedido) {
   const db = await abrirDB();
   await db.runAsync(
@@ -39,20 +39,21 @@ export async function guardarPedidoLocal(pedido) {
   );
 }
 
-// Todos los pedidos guardados localmente (para mostrarlos aunque no haya internet)
+// Obtener todos los pedidos guardados localmente
 export async function obtenerPedidosLocales() {
   const db = await abrirDB();
   const filas = await db.getAllAsync(`SELECT * FROM pedidos_local ORDER BY creadoEn DESC`);
   return filas.map((f) => ({ ...f, items: JSON.parse(f.items) }));
 }
 
-// Pedidos que aún no se han enviado a la API
+// Pedidos que aún no se han enviado al backend Node.js / PostgreSQL
 export async function obtenerPedidosPendientesDeSync() {
   const db = await abrirDB();
   const filas = await db.getAllAsync(`SELECT * FROM pedidos_local WHERE sincronizado = 0`);
   return filas.map((f) => ({ ...f, items: JSON.parse(f.items) }));
 }
 
+// Marcar pedido como sincronizado en SQLite
 export async function marcarComoSincronizado(uuidCliente) {
   const db = await abrirDB();
   await db.runAsync(`UPDATE pedidos_local SET sincronizado = 1 WHERE uuidCliente = ?`, [uuidCliente]);

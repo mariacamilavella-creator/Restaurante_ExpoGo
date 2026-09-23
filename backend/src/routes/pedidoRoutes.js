@@ -4,7 +4,7 @@ const {
   crearPedido,
   sincronizarPedidos,
   misPedidos,
-  cancelarPedidoUsuario,
+  cancelarPedido, // <--- Cambiado para que coincida con el controlador
   listarTodosPedidos,
   actualizarEstadoPedido,
 } = require('../controllers/pedidoController');
@@ -14,7 +14,7 @@ const { verificarToken, soloAdmin } = require('../middleware/auth');
 router.post('/', verificarToken, crearPedido);
 router.post('/sincronizar', verificarToken, sincronizarPedidos);
 router.get('/mios', verificarToken, misPedidos);
-router.put('/:id/cancelar', verificarToken, cancelarPedidoUsuario);
+router.put('/:id/cancelar', verificarToken, cancelarPedido);
 
 // Admin
 router.get('/', verificarToken, soloAdmin, listarTodosPedidos);

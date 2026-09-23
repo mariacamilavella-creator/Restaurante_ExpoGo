@@ -25,7 +25,7 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <View style={styles.contenedor}>
-      <Text style={styles.titulo}>🍽️ Restaurante App</Text>
+      <Text style={styles.titulo}> Restaurante Lasdelicias De Nuestra Tierra</Text>
       <Text style={styles.subtitulo}>Inicia sesión</Text>
 
       <TextInput

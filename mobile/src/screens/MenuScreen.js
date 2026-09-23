@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, RefreshControl, ScrollView } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native'; // 1. Importación agregada
 import NetInfo from '@react-native-community/netinfo';
 import { v4 as uuidv4 } from 'uuid';
 import { api } from '../services/api';
@@ -15,8 +16,6 @@ const MENU_RESPALDO = [
   { id: 'r4', nombre: 'Limonada natural', descripcion: 'Limonada fresca de la casa', precio: 6000, categoria: 'Bebida' },
 ];
 
-// Orden en el que queremos que aparezcan las pestañas de categoría.
-// Cualquier categoría que no esté en esta lista aparece al final.
 const ORDEN_CATEGORIAS = ['Entrada', 'Plato fuerte', 'Bebida', 'Postre'];
 
 function obtenerCategoriasOrdenadas(platos) {
@@ -33,7 +32,7 @@ function obtenerCategoriasOrdenadas(platos) {
 
 export default function MenuScreen() {
   const [menu, setMenu] = useState(MENU_RESPALDO);
-  const [carrito, setCarrito] = useState({}); // { platoId: cantidad }
+  const [carrito, setCarrito] = useState({});
   const [sinConexion, setSinConexion] = useState(false);
   const [refrescando, setRefrescando] = useState(false);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
@@ -46,20 +45,21 @@ export default function MenuScreen() {
         const data = await api.listarMenu();
         if (data.length > 0) setMenu(data);
       } catch {
-        // si falla, seguimos con el menú de respaldo / el último cargado
+        // En caso de fallo se mantiene el último menú conocido
       }
     }
   }, []);
 
-  useEffect(() => {
-    cargarMenu();
-  }, [cargarMenu]);
+  // 2. Se reemplaza useEffect por useFocusEffect para recargar los datos
+  // cada vez que la pantalla pasa a primer plano.
+  useFocusEffect(
+    useCallback(() => {
+      cargarMenu();
+    }, [cargarMenu])
+  );
 
   const categorias = useMemo(() => obtenerCategoriasOrdenadas(menu), [menu]);
 
-  // Cuando el menú cambia (por ejemplo llega de la API), si no hay
-  // categoría activa todavía, o la que estaba activa ya no existe,
-  // seleccionamos la primera disponible automáticamente.
   useEffect(() => {
     if (categorias.length === 0) return;
     if (!categoriaActiva || !categorias.includes(categoriaActiva)) {
@@ -97,11 +97,9 @@ export default function MenuScreen() {
     const uuidCliente = uuidv4();
     const pedido = { uuidCliente, items, notas: '', total };
 
-    // 1) SIEMPRE se guarda primero en SQLite local (offline-first)
     await guardarPedidoLocal(pedido);
     setCarrito({});
 
-    // 2) Si hay internet, se intenta sincronizar de inmediato
     const estadoRed = await NetInfo.fetch();
     if (estadoRed.isConnected) {
       try {
@@ -109,7 +107,7 @@ export default function MenuScreen() {
         Alert.alert('Pedido enviado', 'Tu pedido fue creado y enviado al restaurante ✅');
         return;
       } catch (error) {
-        // si falla la sync, no pasa nada: queda pendiente y se reintentará
+        // Se maneja como fallo silencioso para sincronización en segundo plano
       }
     }
     Alert.alert(
@@ -157,11 +155,16 @@ export default function MenuScreen() {
       <FlatList
         data={platosFiltrados}
         keyExtractor={(item) => String(item.id)}
-        refreshControl={<RefreshControl refreshing={refrescando} onRefresh={async () => {
-          setRefrescando(true);
-          await cargarMenu();
-          setRefrescando(false);
-        }} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refrescando}
+            onRefresh={async () => {
+              setRefrescando(true);
+              await cargarMenu();
+              setRefrescando(false);
+            }}
+          />
+        }
         ListEmptyComponent={
           <Text style={styles.textoVacio}>No hay platos en esta categoría todavía.</Text>
         }
@@ -246,7 +249,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#e63946',
     alignItems: 'center',
-    justifyContent: 'center',
+    justify: 'center',
   },
   botonCantidadTexto: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   cantidad: { width: 30, textAlign: 'center', fontSize: 16 },

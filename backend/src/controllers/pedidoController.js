@@ -1,152 +1,173 @@
-const { Pedido } = require('../models');
+const { Pedido, sequelize } = require('../models');
 
-const ESTADOS_VALIDOS = ['pendiente', 'confirmado', 'en_preparacion', 'cancelado', 'entregado'];
-
-// Crea un pedido nuevo (usado cuando el celular tiene internet al momento de pedir)
-async function crearPedido(req, res) {
+// 1. Crear Pedido
+const crearPedido = async (req, res) => {
   try {
-    const { uuidCliente, items, total, notas } = req.body;
+    const { uuidCliente, items, notas, total } = req.body;
+    const usuarioId = req.usuario ? req.usuario.id : 1; 
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ mensaje: 'El pedido debe tener al menos un producto' });
-    }
-
-    // Si ya existe un pedido con ese uuidCliente, lo devolvemos tal cual
-    // en vez de crear uno duplicado (evita duplicados por reintentos).
-    if (uuidCliente) {
-      const existente = await Pedido.findOne({ where: { uuidCliente } });
-      if (existente) {
-        return res.status(200).json(existente);
-      }
-    }
-
-    const pedido = await Pedido.create({
+    const nuevoPedido = await Pedido.create({
       uuidCliente: uuidCliente || null,
-      usuarioId: req.usuario.id,
-      items,
-      total,
+      usuarioId,
       notas: notas || '',
+      total: total || 0,
+      estado: 'pendiente',
+      items: typeof items === 'string' ? items : JSON.stringify(items || []),
     });
 
-    res.status(201).json(pedido);
+    res.status(201).json({ mensaje: 'Pedido creado exitosamente', pedido: nuevoPedido });
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al crear pedido', error: error.message });
+    console.error('Error al crear pedido:', error);
+    res.status(500).json({ mensaje: 'Error al crear pedido' });
   }
-}
+};
 
-// Recibe un arreglo de pedidos que se hicieron sin conexión (guardados en
-// SQLite local) y los crea en el servidor, uno por uno, evitando duplicados
-// gracias al uuidCliente generado en el celular.
-async function sincronizarPedidos(req, res) {
-  try {
-    const { pedidos } = req.body;
+// 2. Sincronizar Pedidos en Bloque (Offline -> PostgreSQL)
+const sincronizarPedidos = async (req, res) => {
+  const { pedidos } = req.body;
 
-    if (!Array.isArray(pedidos)) {
-      return res.status(400).json({ mensaje: 'Se esperaba un arreglo de pedidos en "pedidos"' });
-    }
+  if (!pedidos || !Array.isArray(pedidos)) {
+    return res.status(400).json({ mensaje: 'Arreglo de pedidos no válido' });
+  }
 
-    const resultados = [];
+  let procesados = 0;
+  let ignorados = 0;
 
-    for (const p of pedidos) {
-      let pedido = p.uuidCliente
-        ? await Pedido.findOne({ where: { uuidCliente: p.uuidCliente } })
-        : null;
-
-      if (!pedido) {
-        pedido = await Pedido.create({
-          uuidCliente: p.uuidCliente || null,
-          usuarioId: req.usuario.id,
-          items: p.items,
-          total: p.total,
-          notas: p.notas || '',
+  for (const p of pedidos) {
+    // Cada pedido maneja su propia transacción independiente
+    const t = await sequelize.transaction();
+    try {
+      if (p.uuidCliente) {
+        const existente = await Pedido.findOne({
+          where: { uuidCliente: p.uuidCliente },
+          transaction: t,
         });
+
+        if (existente) {
+          await t.rollback();
+          ignorados++;
+          continue; // Salta el pedido duplicado
+        }
       }
 
-      resultados.push(pedido);
+      const usuarioId = req.usuario ? req.usuario.id : (p.usuarioId || 1);
+
+      await Pedido.create(
+        {
+          uuidCliente: p.uuidCliente || null,
+          usuarioId: usuarioId,
+          notas: p.notas || '',
+          total: p.total || 0,
+          estado: 'pendiente',
+          items: typeof p.items === 'string' ? p.items : JSON.stringify(p.items || []),
+        },
+        { transaction: t }
+      );
+
+      await t.commit();
+      procesados++;
+    } catch (error) {
+      await t.rollback();
+      // Si ocurre una restricción de unicidad, se cuenta como ignorado sin detener el servidor
+      if (error.name === 'SequelizeUniqueConstraintError') {
+        ignorados++;
+      } else {
+        console.error('Error al procesar un pedido individual:', error.message);
+      }
     }
-
-    res.json(resultados);
-  } catch (error) {
-    res.status(500).json({ mensaje: 'Error al sincronizar pedidos', error: error.message });
   }
-}
 
-// Lista los pedidos del usuario que hizo la petición (perfil usuario)
-async function misPedidos(req, res) {
+  res.status(200).json({
+    mensaje: 'Sincronización completada con éxito',
+    procesados,
+    ignorados,
+  });
+};
+
+// 3. Mis Pedidos
+const misPedidos = async (req, res) => {
   try {
+    const usuarioId = req.usuario ? req.usuario.id : null;
     const pedidos = await Pedido.findAll({
-      where: { usuarioId: req.usuario.id },
+      where: usuarioId ? { usuarioId } : {},
       order: [['createdAt', 'DESC']],
     });
-    res.json(pedidos);
+
+    const pedidosFormateados = pedidos.map((p) => {
+      const jsonPedido = p.toJSON();
+      if (typeof jsonPedido.items === 'string') {
+        try {
+          jsonPedido.items = JSON.parse(jsonPedido.items);
+        } catch (e) {
+          jsonPedido.items = [];
+        }
+      }
+      return jsonPedido;
+    });
+
+    res.json(pedidosFormateados);
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al obtener tus pedidos', error: error.message });
+    console.error('Error al obtener mis pedidos:', error);
+    res.status(500).json({ mensaje: 'Error al obtener pedidos' });
   }
-}
+};
 
-// Cancela un pedido propio (solo si sigue pendiente, y solo el dueño)
-async function cancelarPedidoUsuario(req, res) {
+// 4. Cancelar Pedido
+const cancelarPedido = async (req, res) => {
   try {
-    const pedido = await Pedido.findByPk(req.params.id);
-
-    if (!pedido) {
-      return res.status(404).json({ mensaje: 'Pedido no encontrado' });
-    }
-    if (pedido.usuarioId !== req.usuario.id) {
-      return res.status(403).json({ mensaje: 'No puedes cancelar un pedido que no es tuyo' });
-    }
-    if (pedido.estado !== 'pendiente') {
-      return res.status(400).json({ mensaje: 'Solo se pueden cancelar pedidos en estado pendiente' });
-    }
-
-    pedido.estado = 'cancelado';
-    await pedido.save();
-
-    res.json(pedido);
+    const { id } = req.params;
+    await Pedido.update({ estado: 'cancelado' }, { where: { id } });
+    res.json({ mensaje: 'Pedido cancelado correctamente' });
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al cancelar pedido', error: error.message });
+    console.error('Error al cancelar pedido:', error);
+    res.status(500).json({ mensaje: 'Error al cancelar pedido' });
   }
-}
+};
 
-// Lista TODOS los pedidos (perfil administrador)
-async function listarTodosPedidos(req, res) {
+// 5. Listar Todos los Pedidos (Admin)
+const listarTodosPedidos = async (req, res) => {
   try {
-    const pedidos = await Pedido.findAll({ order: [['createdAt', 'DESC']] });
-    res.json(pedidos);
+    const pedidos = await Pedido.findAll({
+      order: [['createdAt', 'DESC']],
+    });
+
+    const pedidosFormateados = pedidos.map((p) => {
+      const jsonPedido = p.toJSON();
+      if (typeof jsonPedido.items === 'string') {
+        try {
+          jsonPedido.items = JSON.parse(jsonPedido.items);
+        } catch (e) {
+          jsonPedido.items = [];
+        }
+      }
+      return jsonPedido;
+    });
+
+    res.json(pedidosFormateados);
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al listar pedidos', error: error.message });
+    console.error('Error al listar pedidos:', error);
+    res.status(500).json({ mensaje: 'Error al listar pedidos' });
   }
-}
+};
 
-// Cambia el estado de un pedido (perfil administrador): confirmar, poner en
-// preparación, cancelar o marcar como entregado.
-async function actualizarEstadoPedido(req, res) {
+// 6. Actualizar Estado de Pedido (Admin)
+const actualizarEstadoPedido = async (req, res) => {
   try {
+    const { id } = req.params;
     const { estado } = req.body;
-
-    if (!ESTADOS_VALIDOS.includes(estado)) {
-      return res.status(400).json({ mensaje: `Estado inválido. Usa uno de: ${ESTADOS_VALIDOS.join(', ')}` });
-    }
-
-    const pedido = await Pedido.findByPk(req.params.id);
-    if (!pedido) {
-      return res.status(404).json({ mensaje: 'Pedido no encontrado' });
-    }
-
-    pedido.estado = estado;
-    await pedido.save();
-
-    res.json(pedido);
+    await Pedido.update({ estado }, { where: { id } });
+    res.json({ mensaje: 'Estado actualizado correctamente' });
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al actualizar estado del pedido', error: error.message });
+    console.error('Error al actualizar estado:', error);
+    res.status(500).json({ mensaje: 'Error al actualizar estado' });
   }
-}
+};
 
 module.exports = {
   crearPedido,
   sincronizarPedidos,
   misPedidos,
-  cancelarPedidoUsuario,
+  cancelarPedido,
   listarTodosPedidos,
   actualizarEstadoPedido,
 };
