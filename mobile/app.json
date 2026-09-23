@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Restaurante App",
+    "slug": "restaurante-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#ffffff"
+    },
+    "android": {
+     "package": "com.tuusuario.restauranteapp",
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-status-bar"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "0b6d1316-0302-4be2-8dd2-52ccb5df0b5c"
+      }
+    }
+  }
+}
+

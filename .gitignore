@@ -1,0 +1,5 @@
+backend/node_modules/
+backend/.env
+backend/database.sqlite
+mobile/node_modules/
+mobile/.expo/
